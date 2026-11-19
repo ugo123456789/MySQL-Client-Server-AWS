@@ -6,11 +6,21 @@ the other runs only the MySQL client tools. The client connects to the
 server over the private network. Completed as part of the Steghub
 Cloud Engineering internship.
 
+
 ## Architecture
 
-```
-MySQL Client (EC2)  ──── port 3306, private IP ────►  MySQL Server (EC2)
-  mysql-client tools only                              mysql-server + databases
+```mermaid
+flowchart LR
+    Admin["Administrator laptop"]
+
+    subgraph VPC["AWS VPC (private network)"]
+        Client["EC2: mysql-client<br/>MySQL client tools only"]
+        Server["EC2: mysql-server<br/>MySQL server<br/>bind-address: private IP"]
+    end
+
+    Admin -- "SSH TCP/22<br/>admin IP only" --> Client
+    Admin -- "SSH TCP/22<br/>admin IP only" --> Server
+    Client -- "MySQL TCP/3306<br/>private IP only" --> Server
 ```
 
 ## Access Control Layers
@@ -59,6 +69,37 @@ FLUSH PRIVILEGES;
 ```bash
 mysql -u remote_user -p -h <server-private-ip>
 ```
+
+## Least Privilege
+
+`remote_user` was initially granted `ALL PRIVILEGES ON *.*`, which gave
+far more access than the project needed. I created a dedicated database,
+`steg_db`, and limited the user to `SELECT, INSERT, UPDATE, DELETE`
+on that database only. The user remains restricted to the client's
+private IP rather than `%`.
+
+MySQL now binds to the server's private IP instead of `0.0.0.0`, so it
+only listens on the VPC-facing interface.
+
+## Final Verification
+
+From the client instance, connected to the server's private IP:
+
+| Command | Result |
+|---|---|
+| `SELECT USER();` | `remote_user@<client-private-ip>` |
+| `SELECT @@hostname;` | Returned the server's hostname, proving the query ran remotely |
+| `SHOW DATABASES;` | Only `project_db` and system schemas visible |
+| `INSERT` / `SELECT` on `project_db.books` | Rows inserted and returned successfully |
+| `CREATE DATABASE should_fail;` | `ERROR 1044 Access denied`, confirming restricted privileges |
+
+![Remote query verification](screenshots/remote-query.png)
+![Restricted privileges](screenshots/AccessDenied.png)
+
+## Security Notes
+- Port 3306 accepts connections only from the client's private IP
+- SSH on both instances is restricted to a trusted administrator IP
+- No passwords, AWS credentials or private keys are committed
 
 ## Errors Encountered and Fixed
 
